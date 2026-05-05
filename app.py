@@ -4,60 +4,173 @@ import re
 from PIL import Image
 import pandas as pd
 
-# --- БАЗА ДАННИ (като горната) ---
+
+
+    
+    # Премахване на дубликати
+    seen = set()
+    unique_matches = []
+    for match in name_matches:
+        key = (match["term"], match["category"])
+        if key not in seen:
+            seen.add(key)
+            unique_matches.append(match)
+    
+    # Обединяване с Е-номерата
+    for e_num in set(e_matches):
+        if e_num not in [m["term"].upper() for m in unique_matches]:
+            info = ingredient_info.get(e_num, {"category": "Неизвестна категория", "type": "e_number", "e_numbers": [e_num]})
+            unique_matches.append({
+                "term": e_num,
+                "category": info["category"],
+                "type": "e_number",
+                "e_numbers": [e_num]
+            })
+    
+    return unique_matches
+
+
+# --- БАЗА ДАННИ С ВРЕДНИ СЪСТАВКИ (БЪЛГАРСКИ + АНГЛИЙСКИ + Е-НОМЕРА) ---
 harmful_ingredients_db = {
-    "Консерванти (парабени)": {
-        "names": ["methylparaben", "ethylparaben", "propylparaben", "butylparaben"],
+    "Парабени (консерванти)": {
+        "names_bg": ["метилпарабен", "етилпарабен", "пропилпарабен", "бутилпарабен", "изобутилпарабен"],
+        "names_en": ["methylparaben", "ethylparaben", "propylparaben", "butylparaben", "isobutylparaben"],
         "e_numbers": []
     },
-    "Формалдехид (консервант)": {
-        "names": ["formaldehyde"],
+    "Формалдехид и донори": {
+        "names_bg": ["формалдехид", "дмдм хидантоин", "кватерниум-15"],
+        "names_en": ["formaldehyde", "dmdm hydantoin", "quaternium-15"],
         "e_numbers": ["E240"]
     },
-    "Сулфати": {
-        "names": ["sodium lauryl sulfate", "sodium laureth sulfate"],
+    "Сулфати (пянообразуватели)": {
+        "names_bg": ["натриев лаурил сулфат", "натриев лаурет сулфат", "амониев лаурил сулфат"],
+        "names_en": ["sodium lauryl sulfate", "sodium laureth sulfate", "ammonium lauryl sulfate"],
+        "e_numbers": []
+    },
+    "Фталати": {
+        "names_bg": ["фталат", "диетилфталат", "дибутилфталат"],
+        "names_en": ["phthalate", "dep", "dbp"],
         "e_numbers": []
     },
     "Изкуствени подсладители": {
-        "names": ["aspartame", "saccharin"],
-        "e_numbers": ["E951", "E954"]
+        "names_bg": ["аспартам", "захарин", "сукралоза", "ацесулфам к"],
+        "names_en": ["aspartame", "saccharin", "sucralose", "acesulfame k"],
+        "e_numbers": ["E951", "E954", "E955", "E950"]
     },
     "Вредни оцветители": {
-        "names": ["tartrazine", "sunset yellow"],
-        "e_numbers": ["E102", "E110"]
+        "names_bg": ["тартразин", "сончев залез жълто", "азорубин", "брилянтно синьо", "еритрозин"],
+        "names_en": ["tartrazine", "sunset yellow", "azorubine", "brilliant blue", "erythrosine"],
+        "e_numbers": ["E102", "E110", "E122", "E133", "E127"]
     },
-    "Глутамат натрий": {
-        "names": ["monosodium glutamate", "msg"],
+    "Глутамат натрий (усилвател на вкуса)": {
+        "names_bg": ["мононатриев глутамат", "глутаминова киселина"],
+        "names_en": ["monosodium glutamate", "msg", "glutamic acid"],
         "e_numbers": ["E621"]
     },
-    "Нитрити и нитрати": {
-        "names": ["sodium nitrite"],
-        "e_numbers": ["E250", "E251"]
+    "Трансмазнини": {
+        "names_bg": ["хидрогенизирано растително масло", "трансмазнини", "частично хидрогенизирано масло"],
+        "names_en": ["hydrogenated vegetable oil", "trans fat", "partially hydrogenated oil"],
+        "e_numbers": []
     },
-    "Бензоати": {
-        "names": ["sodium benzoate"],
-        "e_numbers": ["E211"]
+    "Нитрати и нитрити": {
+        "names_bg": ["натриев нитрат", "калиев нитрат", "натриев нитрит", "калиев нитрит"],
+        "names_en": ["sodium nitrate", "potassium nitrate", "sodium nitrite", "potassium nitrite"],
+        "e_numbers": ["E251", "E252", "E250", "E249"]
+    },
+    "Бензоати (консерванти)": {
+        "names_bg": ["натриев бензоат", "бензоена киселина", "калиев бензоат"],
+        "names_en": ["sodium benzoate", "benzoic acid", "potassium benzoate"],
+        "e_numbers": ["E211", "E210", "E212"]
+    },
+    "Сорбати (консерванти)": {
+        "names_bg": ["сорбинова киселина", "калиев сорбат", "калциев сорбат"],
+        "names_en": ["sorbic acid", "potassium sorbate", "calcium sorbate"],
+        "e_numbers": ["E200", "E202", "E203"]
+    },
+    "BHA и BHT (антиоксиданти)": {
+        "names_bg": ["бутилхидроксианизол", "бутилхидрокситолуен"],
+        "names_en": ["butylated hydroxyanisole", "butylated hydroxytoluene", "bha", "bht"],
+        "e_numbers": ["E320", "E321"]
+    },
+    "Пропилен гликол": {
+        "names_bg": ["пропилен гликол", "пропан-1,2-диол"],
+        "names_en": ["propylene glycol", "propane-1,2-diol"],
+        "e_numbers": ["E490"]
+    },
+    "Силикони": {
+        "names_bg": ["диметикон", "циклометикон", "циклопентасилоксан"],
+        "names_en": ["dimethicone", "cyclomethicone", "cyclopentasiloxane"],
+        "e_numbers": []
+    },
+    "Минерални масла": {
+        "names_bg": ["минерално масло", "парафинум ликвидум", "петролатум", "вазелин"],
+        "names_en": ["mineral oil", "paraffinum liquidum", "petrolatum", "vaseline"],
+        "e_numbers": ["E905a", "E905b"]
+    },
+    "Пестициди (остатъци)": {
+        "names_bg": ["пестицид", "хлорпирифос", "глифозат"],
+        "names_en": ["pesticide", "chlorpyrifos", "glyphosate"],
+        "e_numbers": []
     }
 }
 
-# Подготовка за търсене
-search_data = []  # за таблицата
+# Създаваме сет за бързо търсене (всичко в малки букви)
+harmful_search_set = set()
+ingredient_info = {}  # {"име": {"категория": "...", "e_number": "..."}}
 
 for category, data in harmful_ingredients_db.items():
-    for name in data["names"]:
-        search_data.append({
-            "Категория": category,
-            "Име на съставка": name.title(),
-            "Е-номер": ", ".join(data["e_numbers"]) if data["e_numbers"] else "-"
-        })
+    # Добавяне на български имена
+    for name_bg in data["names_bg"]:
+        name_lower = name_bg.lower()
+        harmful_search_set.add(name_lower)
+        ingredient_info[name_lower] = {
+            "category": category,
+            "type": "bg_name",
+            "e_numbers": data["e_numbers"]
+        }
+    
+    # Добавяне на английски имена
+    for name_en in data["names_en"]:
+        name_lower = name_en.lower()
+        harmful_search_set.add(name_lower)
+        ingredient_info[name_lower] = {
+            "category": category,
+            "type": "en_name",
+            "e_numbers": data["e_numbers"]
+        }
+    
+    # Добавяне на Е-номера
     for e_num in data["e_numbers"]:
-        search_data.append({
-            "Категория": category,
-            "Име на съставка": "-",
-            "Е-номер": e_num
-        })
+        e_num_upper = e_num.upper()
+        harmful_search_set.add(e_num_upper)
+        ingredient_info[e_num_upper] = {
+            "category": category,
+            "type": "e_number",
+            "e_numbers": [e_num]
+        }
 
 df_harmful = pd.DataFrame(search_data)
+
+def detect_harmful_ingredients(text):
+    """Открива вредни съставки в текст (български, английски, Е-номера)"""
+    text_lower = text.lower()
+    
+    # Търсене на Е-номера (E###)
+    e_matches = re.findall(r'e[0-9]{3}', text_lower)
+    e_matches = [f"E{m[1:].upper()}" for m in e_matches]
+    
+    # Търсене на имена (български и английски)
+    name_matches = []
+    
+    for harmful_term in harmful_search_set:
+        if harmful_term in text_lower:
+            info = ingredient_info[harmful_term]
+            name_matches.append({
+                "term": harmful_term,
+                "category": info["category"],
+                "type": info["type"],
+                "e_numbers": info["e_numbers"]
+            })
 
 # --- STREAMLIT UI ---
 st.set_page_config(page_title="Анализатор на вредни съставки + Е-номера", page_icon="🛡️")
