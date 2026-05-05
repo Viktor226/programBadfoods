@@ -5,6 +5,89 @@ import pandas as pd
 from PIL import Image
 import os
 
+# --- БАЗА ДАННИ С ВРЕДНИ СЪСТАВКИ (БЪЛГАРСКИ + АНГЛИЙСКИ + Е-НОМЕРА) ---
+harmful_ingredients_db = {
+    "Парабени (консерванти)": {
+        "names_bg": ["метилпарабен", "етилпарабен", "пропилпарабен", "бутилпарабен", "изобутилпарабен"],
+        "names_en": ["methylparaben", "ethylparaben", "propylparaben", "butylparaben", "isobutylparaben"],
+        "e_numbers": []
+    },
+    "Формалдехид и донори": {
+        "names_bg": ["формалдехид", "дмдм хидантоин", "кватерниум-15"],
+        "names_en": ["formaldehyde", "dmdm hydantoin", "quaternium-15"],
+        "e_numbers": ["E240"]
+    },
+    "Сулфати (пянообразуватели)": {
+        "names_bg": ["натриев лаурил сулфат", "натриев лаурет сулфат", "амониев лаурил сулфат"],
+        "names_en": ["sodium lauryl sulfate", "sodium laureth sulfate", "ammonium lauryl sulfate"],
+        "e_numbers": []
+    },
+    "Фталати": {
+        "names_bg": ["фталат", "диетилфталат", "дибутилфталат"],
+        "names_en": ["phthalate", "dep", "dbp"],
+        "e_numbers": []
+    },
+    "Изкуствени подсладители": {
+        "names_bg": ["аспартам", "захарин", "сукралоза", "ацесулфам к"],
+        "names_en": ["aspartame", "saccharin", "sucralose", "acesulfame k"],
+        "e_numbers": ["E951", "E954", "E955", "E950"]
+    },
+    "Вредни оцветители": {
+        "names_bg": ["тартразин", "сончев залез жълто", "азорубин", "брилянтно синьо", "еритрозин"],
+        "names_en": ["tartrazine", "sunset yellow", "azorubine", "brilliant blue", "erythrosine"],
+        "e_numbers": ["E102", "E110", "E122", "E133", "E127"]
+    },
+    "Глутамат натрий (усилвател на вкуса)": {
+        "names_bg": ["мононатриев глутамат", "глутаминова киселина"],
+        "names_en": ["monosodium glutamate", "msg", "glutamic acid"],
+        "e_numbers": ["E621"]
+    },
+    "Трансмазнини": {
+        "names_bg": ["хидрогенизирано растително масло", "трансмазнини", "частично хидрогенизирано масло"],
+        "names_en": ["hydrogenated vegetable oil", "trans fat", "partially hydrogenated oil"],
+        "e_numbers": []
+    },
+    "Нитрати и нитрити": {
+        "names_bg": ["натриев нитрат", "калиев нитрат", "натриев нитрит", "калиев нитрит"],
+        "names_en": ["sodium nitrate", "potassium nitrate", "sodium nitrite", "potassium nitrite"],
+        "e_numbers": ["E251", "E252", "E250", "E249"]
+    },
+    "Бензоати (консерванти)": {
+        "names_bg": ["натриев бензоат", "бензоена киселина", "калиев бензоат"],
+        "names_en": ["sodium benzoate", "benzoic acid", "potassium benzoate"],
+        "e_numbers": ["E211", "E210", "E212"]
+    },
+    "Сорбати (консерванти)": {
+        "names_bg": ["сорбинова киселина", "калиев сорбат", "калциев сорбат"],
+        "names_en": ["sorbic acid", "potassium sorbate", "calcium sorbate"],
+        "e_numbers": ["E200", "E202", "E203"]
+    },
+    "BHA и BHT (антиоксиданти)": {
+        "names_bg": ["бутилхидроксианизол", "бутилхидрокситолуен"],
+        "names_en": ["butylated hydroxyanisole", "butylated hydroxytoluene", "bha", "bht"],
+        "e_numbers": ["E320", "E321"]
+    },
+    "Пропилен гликол": {
+        "names_bg": ["пропилен гликол", "пропан-1,2-диол"],
+        "names_en": ["propylene glycol", "propane-1,2-diol"],
+        "e_numbers": ["E490"]
+    },
+    "Силикони": {
+        "names_bg": ["диметикон", "циклометикон", "циклопентасилоксан"],
+        "names_en": ["dimethicone", "cyclomethicone", "cyclopentasiloxane"],
+        "e_numbers": []
+    },
+    "Минерални масла": {
+        "names_bg": ["минерално масло", "парафинум ликвидум", "петролатум", "вазелин"],
+        "names_en": ["mineral oil", "paraffinum liquidum", "petrolatum", "vaseline"],
+        "e_numbers": ["E905a", "E905b"]
+    },
+    "Пестициди (остатъци)": {
+        "names_bg": ["пестицид", "хлорпирифос", "глифозат"],
+        "names_en": ["pesticide", "chlorpyrifos", "glyphosate"],
+        "e_numbers": []
+    }
+}
 # Създаваме сет за бързо търсене (всичко в малки букви)
 harmful_search_set = set()
 ingredient_info = {}  # {"име": {"категория": "...", "e_number": "..."}}
