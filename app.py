@@ -1,36 +1,24 @@
 import streamlit as st
-import easyocr
+import pytesseract
 import cv2
 import numpy as np
 import pandas as pd
 import re
 from PIL import Image
+import io
 import os
 
-# ------------------------------------------------------------
-# 1. Конфигурация на страницата
-# ------------------------------------------------------------
+# --- 1. Конфигурация на страницата ---
 st.set_page_config(
-    page_title="Анализатор на вредни съставки - EasyOCR",
+    page_title="Анализатор на вредни съставки",
     page_icon="🛡️",
     layout="wide"
 )
 
 st.title("🛡️ Анализатор на вредни съставки")
-st.markdown("**Автоматично разпознаване на текст от снимка с EasyOCR**")
+st.markdown("**Автоматично разпознаване на текст от снимка**")
 
-# ------------------------------------------------------------
-# 2. Кеширане на EasyOCR модела (зарежда се само веднъж)
-# ------------------------------------------------------------
-@st.cache_resource
-def load_easyocr_reader():
-    # Върни Reader само за български и английски (намалява зареждането)
-    # gpu=False е задължително за Streamlit Cloud (няма GPU)
-    return easyocr.Reader(['bg', 'en'], gpu=False)
-
-# ------------------------------------------------------------
-# 3. База данни с вредни съставки (български + английски + Е-номера)
-# ------------------------------------------------------------
+# --- 2. База данни с вредни съставки ---
 harmful_db = {
     "Парабени": {
         "bg": ["метилпарабен", "етилпарабен", "пропилпарабен", "бутилпарабен"],
@@ -76,145 +64,161 @@ harmful_db = {
         "bg": ["захарин", "сахарин"],
         "en": ["saccharin"],
         "e": ["E954"]
-    },
-    "BHA / BHT": {
-        "bg": ["бутилхидроксианизол", "бутилхидрокситолуен"],
-        "en": ["bha", "bht", "butylated hydroxyanisole", "butylated hydroxytoluene"],
-        "e": ["E320", "E321"]
     }
 }
 
-# Подготовка на сет за бързо търсене
+# Подготовка на сета за търсене
 search_set = set()
-info_map = {}
+info_dict = {}
 
 for category, data in harmful_db.items():
-    for name_bg in data["bg"]:
-        key = name_bg.lower()
-        search_set.add(key)
-        info_map[key] = (category, "🇧🇬")
-    for name_en in data["en"]:
-        key = name_en.lower()
-        search_set.add(key)
-        info_map[key] = (category, "🇬🇧")
+    # Български имена
+    for name in data["bg"]:
+        name_low = name.lower()
+        search_set.add(name_low)
+        info_dict[name_low] = {"category": category, "lang": "🇧🇬 Българско"}
+    # Английски имена
+    for name in data["en"]:
+        name_low = name.lower()
+        search_set.add(name_low)
+        info_dict[name_low] = {"category": category, "lang": "🇬🇧 Английско"}
+    # Е-номера
     for e_num in data["e"]:
-        key = e_num.upper()
-        search_set.add(key)
-        info_map[key] = (category, "🔢")
+        search_set.add(e_num.upper())
+        info_dict[e_num.upper()] = {"category": category, "lang": "🔢 Е-номер"}
 
-# ------------------------------------------------------------
-# 4. Функция за търсене на вредни съставки
-# ------------------------------------------------------------
-def find_harmful(text: str):
+def detect_harmful(text):
+    """Търси вредни съставки в текста"""
     if not text:
         return []
     text_lower = text.lower()
     found = []
     
-    # Търсене на Е-номера (напр. E211)
+    # Търсене на Е-номера
     e_matches = re.findall(r'e[0-9]{3}', text_lower)
-    for e in e_matches:
-        e_upper = f"E{e[1:].upper()}"
+    for e_code in e_matches:
+        e_upper = f"E{e_code[1:].upper()}"
         if e_upper in search_set:
-            cat, icon = info_map[e_upper]
-            found.append({"term": e_upper, "category": cat, "icon": icon})
+            found.append({
+                "name": e_upper,
+                "category": info_dict[e_upper]["category"],
+                "type": info_dict[e_upper]["lang"]
+            })
     
     # Търсене на имена
     for keyword in search_set:
         if keyword in text_lower and not keyword.startswith('e'):
             if len(keyword) > 3:
-                cat, icon = info_map[keyword]
-                found.append({"term": keyword.title(), "category": cat, "icon": icon})
+                found.append({
+                    "name": keyword.title(),
+                    "category": info_dict[keyword]["category"],
+                    "type": info_dict[keyword]["lang"]
+                })
     
-    # Премахване на дубликати (по термин и категория)
+    # Премахване на дубликати
     unique = []
     seen = set()
     for item in found:
-        key = (item["term"], item["category"])
+        key = (item["name"], item["category"])
         if key not in seen:
             seen.add(key)
             unique.append(item)
     return unique
 
-# ------------------------------------------------------------
-# 5. Основна функция за разпознаване на текст от изображение
-# ------------------------------------------------------------
-def extract_text_from_image(image_file, reader):
-    # Конвертиране на PIL Image към numpy масив
-    img = Image.open(image_file)
-    img_np = np.array(img)
+def process_image(image_file):
+    """Обработва изображението и разпознава текст с Tesseract"""
+    # Четене на изображението
+    image = Image.open(image_file)
     
-    # OpenCV обработка за по-добро разпознаване
-    if len(img_np.shape) == 3:
-        img_np = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-    gray = cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY)
+    # Конвертиране към numpy array за OpenCV
+    img_array = np.array(image)
+    
+    # Конвертиране към RGB (ако е необходимо)
+    if len(img_array.shape) == 3:
+        img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+    
+    # Преобразуване в сива скала
+    gray = cv2.cvtColor(img_array, cv2.COLOR_BGR2GRAY)
+    
+    # Подобряване на качеството за по-добро OCR
     gray = cv2.medianBlur(gray, 1)
     gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     
-    # EasyOCR разпознаване (detail=0 връща само текста)
-    result = reader.readtext(gray, detail=0, paragraph=True)
-    full_text = " ".join(result)
-    return full_text
+    # Разпознаване на текст (български и английски)
+    text = pytesseract.image_to_string(gray, lang='bul+eng')
+    
+    return text
 
-# ------------------------------------------------------------
-# 6. Интерфейс на Streamlit
-# ------------------------------------------------------------
+# --- 3. Интерфейс на Streamlit ---
 tab1, tab2, tab3 = st.tabs(["📸 Анализ на снимка", "📋 Списък с вредни съставки", "ℹ️ Помощ"])
 
 with tab1:
     st.subheader("📸 Качи снимка на етикет")
-    uploaded_file = st.file_uploader("Избери файл (JPG, JPEG, PNG)", type=['jpg', 'jpeg', 'png'])
+    uploaded_file = st.file_uploader(
+        "Избери снимка (JPG, JPEG, PNG)",
+        type=['jpg', 'jpeg', 'png'],
+        help="Снимката трябва да е ясна и добре осветена"
+    )
     
     if uploaded_file:
         col1, col2 = st.columns([1, 1])
+        
         with col1:
             image = Image.open(uploaded_file)
             st.image(image, caption="Вашата снимка", use_column_width=True)
         
         with col2:
             if st.button("🔍 АНАЛИЗИРАЙ СНИМКАТА", type="primary", use_container_width=True):
-                with st.spinner("📖 Зареждане на EasyOCR модел (само веднъж) и разпознаване..."):
-                    reader = load_easyocr_reader()
-                    recognized_text = extract_text_from_image(uploaded_file, reader)
-                
-                # Показване на разпознатия текст
-                with st.expander("📝 Разпознат текст от снимката", expanded=False):
-                    if recognized_text.strip():
-                        st.text(recognized_text[:1000])
-                        if len(recognized_text) > 1000:
-                            st.caption("... текстът е съкратен")
-                    else:
-                        st.warning("⚠️ Не беше разпознат текст. Опитай с по-ясна снимка.")
-                
-                # Търсене на вредни съставки
-                harmful_items = find_harmful(recognized_text)
-                
-                st.markdown("---")
-                st.subheader("🔬 РЕЗУЛТАТИ ОТ АНАЛИЗА")
-                
-                if harmful_items:
-                    st.error(f"⚠️ **Открити {len(harmful_items)} потенциално вредни съставки!**")
-                    for item in harmful_items:
-                        st.warning(f"{item['icon']} **{item['term'].upper()}** → {item['category']}")
-                    
-                    # Таблица за експорт
-                    df = pd.DataFrame([{
-                        "Съставка/Е-номер": i["term"].upper(),
-                        "Категория": i["category"],
-                        "Тип": i["icon"]
-                    } for i in harmful_items])
-                    st.dataframe(df, use_container_width=True)
-                    
-                    csv = df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Изтегли резултатите (CSV)",
-                        data=csv,
-                        file_name="harmful_detected.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.success("✅ **НЕ СА ОТКРИТИ ВРЕДНИ СЪСТАВКИ!**")
-                    st.balloons()
+                with st.spinner("📖 Разпознаване на текст от изображение..."):
+                    try:
+                        recognized_text = process_image(uploaded_file)
+                        harmful_found = detect_harmful(recognized_text)
+                        
+                        with st.expander("📝 Разпознат текст от снимката", expanded=False):
+                            if recognized_text.strip():
+                                st.text(recognized_text[:1000])
+                                if len(recognized_text) > 1000:
+                                    st.caption("... текстът е съкратен")
+                            else:
+                                st.warning("⚠️ Не беше разпознат текст. Опитай с по-ясна снимка или използвай полето по-долу за ръчно въвеждане.")
+                        
+                        # Ръчно въвеждане като резерв
+                        manual_text = st.text_area("✏️ Или въведи списъка със съставки ръчно (алтернатива):", key="manual_input")
+                        if manual_text:
+                            harmful_found = detect_harmful(manual_text)
+                        
+                        st.markdown("---")
+                        st.subheader("🔬 РЕЗУЛТАТИ ОТ АНАЛИЗА")
+                        
+                        if harmful_found:
+                            st.error(f"⚠️ **Открити {len(harmful_found)} потенциално вредни съставки!**")
+                            for item in harmful_found:
+                                st.warning(f"**{item['name'].upper()}** → {item['category']} ({item['type']})")
+                            
+                            results_data = []
+                            for item in harmful_found:
+                                results_data.append({
+                                    "Съставка / Е-номер": item["name"].upper(),
+                                    "Категория": item["category"],
+                                    "Тип": item["type"]
+                                })
+                            df_results = pd.DataFrame(results_data)
+                            st.dataframe(df_results, use_container_width=True)
+                            
+                            csv = df_results.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Изтегли резултатите като CSV",
+                                data=csv,
+                                file_name="harmful_detections.csv",
+                                mime="text/csv"
+                            )
+                        else:
+                            st.success("✅ **НЕ СА ОТКРИТИ ВРЕДНИ СЪСТАВКИ!**")
+                            st.balloons()
+                            
+                    except Exception as e:
+                        st.error(f"❌ Грешка при обработката: {str(e)}")
+                        st.info("Моля, опитай с друга снимка или използвай полето за ръчно въвеждане на текст.")
 
 with tab2:
     st.subheader("📋 Пълен списък на вредните съставки")
@@ -226,13 +230,7 @@ with tab2:
             rows.append({"Категория": cat, "Име": name.title(), "Е-номер(и)": e_nums})
     df_full = pd.DataFrame(rows)
     st.dataframe(df_full, use_container_width=True, height=400)
-    
-    st.download_button(
-        label="📥 Изтегли пълния списък (CSV)",
-        data=df_full.to_csv(index=False),
-        file_name="all_harmful_ingredients.csv",
-        mime="text/csv"
-    )
+    st.download_button(label="📥 Изтегли пълния списък (CSV)", data=df_full.to_csv(index=False), file_name="all_harmful_ingredients.csv", mime="text/csv")
 
 with tab3:
     st.subheader("ℹ️ Инструкции и важна информация")
@@ -240,22 +238,21 @@ with tab3:
     ### Как да използвам приложението?
     1. Качи снимка на етикет на продукт (храна, козметика и др.)
     2. Натисни „Анализирай снимката“
-    3. Изчакай няколко секунди (първото стартиране може да е по-бавно, защото се теглят модели)
+    3. Изчакай няколко секунди (първото стартиране може да е по-бавно)
     4. Виж кои вредни съставки са открити
     
-    ### Какво разпознава EasyOCR?
+    ### Какво разпознава приложението?
     - Български и английски текст
-    - Главни и малки букви
-    - Печатни букви (не ръкопис)
+    - Е-номера (E100-E999)
     
     ### Забележки:
-    - Първото зареждане на модела може да отнеме ~30 секунди и да изтегли около 200MB данни.
-    - Приложението работи **на CPU**, затова е по-бавно от локален вариант с GPU, но е напълно функционално.
-    - Ако срещнеш грешка за липса на памет, опитай с по-малка снимка или ползвай Hugging Face Spaces (дава повече RAM).
+    - Приложението използва **Tesseract OCR**, който е инсталиран на сървъра.
+    - Първото стартиране може да отнеме повече време, защото се инсталират системните зависимости.
+    - Ако OCR не разпознае добре текста, имаш възможност да въведеш съставките **ръчно** в полето отдолу.
     
     ### Важно:
     Това приложение е **информативно** и не е медицински или експертен съвет.
     """)
 
 st.markdown("---")
-st.caption("📌 Основано на EasyOCR + Streamlit | Версия 1.0")
+st.caption("📌 Версия 2.0 | Базирано на Tesseract OCR | За въпроси и предложения: ...")
