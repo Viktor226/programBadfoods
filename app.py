@@ -1,213 +1,141 @@
 import streamlit as st
-from PIL import Image
+import pytesseract
+import cv2
+import numpy as np
 import pandas as pd
 import re
+from PIL import Image
+import os
 
-# Конфигурация за страницата
-st.set_page_config(
-    page_title="Анализатор на вредни съставки",
-    page_icon="🛡️",
-    layout="wide"
-)
+# Конфигурация за Windows (промени пътя ако е нужно)
+pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# Заглавие
+st.set_page_config(page_title="Вредни съставки - Tesseract", page_icon="🛡️", layout="wide")
+
 st.title("🛡️ Анализатор на вредни съставки")
-st.markdown("Качи снимка на етикет и ще разпознаем вредните съставки")
+st.markdown("**Автоматично разпознаване на текст от снимка с Tesseract OCR**")
 
-# --- БАЗА ДАННИ С ВРЕДНИ СЪСТАВКИ (БЪЛГАРСКИ + АНГЛИЙСКИ + Е-НОМЕРА) ---
-harmful_ingredients_db = {
-    "Парабени (консерванти)": {
-        "names_bg": ["метилпарабен", "етилпарабен", "пропилпарабен", "бутилпарабен"],
-        "names_en": ["methylparaben", "ethylparaben", "propylparaben", "butylparaben"],
-        "e_numbers": []
+# --- (същата база данни като във Версия 1) ---
+harmful_db = {
+    "Парабени": {
+        "bg": ["метилпарабен", "етилпарабен", "пропилпарабен", "бутилпарабен"],
+        "en": ["methylparaben", "ethylparaben", "propylparaben", "butylparaben"],
+        "e": []
     },
-    "Сулфати (пянообразуватели)": {
-        "names_bg": ["натриев лаурил сулфат", "натриев лаурет сулфат"],
-        "names_en": ["sodium lauryl sulfate", "sodium laureth sulfate", "sls", "sles"],
-        "e_numbers": []
+    "Сулфати": {
+        "bg": ["натриев лаурил сулфат", "натриев лаурет сулфат"],
+        "en": ["sodium lauryl sulfate", "sodium laureth sulfate", "sls", "sles"],
+        "e": []
     },
     "Формалдехид": {
-        "names_bg": ["формалдехид"],
-        "names_en": ["formaldehyde"],
-        "e_numbers": ["E240"]
+        "bg": ["формалдехид"],
+        "en": ["formaldehyde"],
+        "e": ["E240"]
     },
-    "Изкуствени подсладители": {
-        "names_bg": ["аспартам", "захарин", "сукралоза"],
-        "names_en": ["aspartame", "saccharin", "sucralose"],
-        "e_numbers": ["E951", "E954", "E955"]
+    "Аспартам": {
+        "bg": ["аспартам"],
+        "en": ["aspartame"],
+        "e": ["E951"]
     },
-    "Вредни оцветители": {
-        "names_bg": ["тартразин", "сончев залез", "азорубин"],
-        "names_en": ["tartrazine", "sunset yellow", "azorubine"],
-        "e_numbers": ["E102", "E110", "E122"]
+    "Глутамат": {
+        "bg": ["мононатриев глутамат"],
+        "en": ["monosodium glutamate", "msg"],
+        "e": ["E621"]
     },
-    "Глутамат натрий": {
-        "names_bg": ["мононатриев глутамат", "глутаминова киселина"],
-        "names_en": ["monosodium glutamate", "msg"],
-        "e_numbers": ["E621"]
+    "Бензоат натрий": {
+        "bg": ["натриев бензоат"],
+        "en": ["sodium benzoate"],
+        "e": ["E211"]
     },
-    "Бензоати": {
-        "names_bg": ["натриев бензоат", "бензоена киселина"],
-        "names_en": ["sodium benzoate", "benzoic acid"],
-        "e_numbers": ["E211", "E210"]
-    },
-    "Нитрати и нитрити": {
-        "names_bg": ["натриев нитрат", "натриев нитрит"],
-        "names_en": ["sodium nitrate", "sodium nitrite"],
-        "e_numbers": ["E251", "E250"]
+    "Тартразин": {
+        "bg": ["тартразин"],
+        "en": ["tartrazine"],
+        "e": ["E102"]
     }
 }
 
 # Подготовка за търсене
-harmful_search_set = set()
+search_set = set()
 ingredient_info = {}
 
-for category, data in harmful_ingredients_db.items():
-    for name in data["names_bg"]:
-        name_lower = name.lower()
-        harmful_search_set.add(name_lower)
-        ingredient_info[name_lower] = {"category": category, "type": "bg"}
-    
-    for name in data["names_en"]:
-        name_lower = name.lower()
-        harmful_search_set.add(name_lower)
-        ingredient_info[name_lower] = {"category": category, "type": "en"}
-    
-    for e_num in data["e_numbers"]:
-        harmful_search_set.add(e_num.upper())
-        ingredient_info[e_num.upper()] = {"category": category, "type": "e"}
+for cat, data in harmful_db.items():
+    for name in data["bg"]:
+        search_set.add(name.lower())
+        ingredient_info[name.lower()] = {"category": cat, "type": "🇧🇬"}
+    for name in data["en"]:
+        search_set.add(name.lower())
+        ingredient_info[name.lower()] = {"category": cat, "type": "🇬🇧"}
+    for e_num in data["e"]:
+        search_set.add(e_num.upper())
+        ingredient_info[e_num.upper()] = {"category": cat, "type": "🔢"}
 
-# --- Функция за разпознаване на текст (без EasyOCR - само симулация за тест) ---
-def detect_harmful_from_text(text):
-    """Търси вредни съставки в текст"""
+def find_harmful(text):
     text_lower = text.lower()
     detected = []
     
-    # Търсене на Е-номера
     e_matches = re.findall(r'e[0-9]{3}', text_lower)
-    for e_num in e_matches:
-        e_num_upper = f"E{e_num[1:].upper()}"
-        if e_num_upper in harmful_search_set:
-            detected.append({
-                "term": e_num_upper,
-                "category": ingredient_info[e_num_upper]["category"],
-                "type": "Е-номер"
-            })
+    for e in e_matches:
+        e_upper = f"E{e[1:].upper()}"
+        if e_upper in search_set:
+            detected.append({"term": e_upper, "info": ingredient_info[e_upper]})
     
-    # Търсене на имена
-    for harmful in harmful_search_set:
-        if harmful in text_lower and not harmful.startswith('e'):
-            if len(harmful) > 3:  # игнорираме твърде кратки думи
-                detected.append({
-                    "term": harmful,
-                    "category": ingredient_info[harmful]["category"],
-                    "type": "Българско" if ingredient_info[harmful]["type"] == "bg" else "Английско"
-                })
+    for item in search_set:
+        if item in text_lower and not item.startswith('E') and not item.startswith('e'):
+            if len(item) > 3:
+                detected.append({"term": item, "info": ingredient_info[item]})
     
-    # Премахване на дубликати
     unique = []
     seen = set()
     for d in detected:
-        key = (d["term"], d["category"])
-        if key not in seen:
-            seen.add(key)
+        if d["term"] not in seen:
+            seen.add(d["term"])
             unique.append(d)
-    
     return unique
 
-# --- Streamlit интерфейс ---
-tab1, tab2, tab3 = st.tabs(["📸 Анализ на етикет", "📚 Списък с вредни съставки", "ℹ️ Инструкции"])
-
-with tab1:
-    uploaded_file = st.file_uploader("Качи снимка на етикет", type=['jpg', 'jpeg', 'png'])
+def extract_text_from_image(image_path):
+    """Разпознава текст от изображение с Tesseract"""
+    img = cv2.imread(image_path)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    if uploaded_file:
-        # Показване на снимката
+    # Подобряване на качеството
+    gray = cv2.medianBlur(gray, 1)
+    gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    
+    text = pytesseract.image_to_string(gray, lang='bul+eng')
+    return text
+
+# Интерфейс
+uploaded_file = st.file_uploader("📸 Избери снимка на етикет", type=['jpg', 'jpeg', 'png'])
+
+if uploaded_file:
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
         image = Image.open(uploaded_file)
         st.image(image, caption="Качена снимка", use_column_width=True)
-        
-        # Ръчно въвеждане на текст (заради липсата на OCR в облака)
-        st.markdown("---")
-        st.info("📝 **Важно:** Поради технически ограничения в Streamlit Cloud, моля, въведи текста от етикета ръчно:")
-        
-        manual_text = st.text_area(
-            "Въведи съставките от етикета:",
-            placeholder="Пример: Aqua, Sodium Lauryl Sulfate, Methylparaben, Glycerin, E211",
-            height=150
-        )
-        
-        if st.button("🔍 Анализирай", type="primary"):
-            if manual_text:
-                with st.spinner("Анализиране на съставките..."):
-                    detected = detect_harmful_from_text(manual_text)
+    
+    with col2:
+        if st.button("🔍 АНАЛИЗИРАЙ", type="primary", use_container_width=True):
+            with st.spinner("📖 Разпознаване на текст от изображение..."):
+                temp_path = "temp_image.jpg"
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
                 
-                if detected:
-                    st.error(f"⚠️ **Открити {len(detected)} потенциално вредни съставки!**")
-                    
-                    # Таблица с резултатите
-                    results_data = []
-                    for item in detected:
-                        results_data.append({
-                            "Съставка / Е-номер": item["term"].upper(),
-                            "Категория": item["category"],
-                            "Тип": item["type"]
-                        })
-                    
-                    df_results = pd.DataFrame(results_data)
-                    st.dataframe(df_results, use_container_width=True)
-                    
-                    # Детайлен списък
-                    for item in detected:
-                        st.warning(f"⚠️ **{item['term'].upper()}** → {item['category']}")
-                else:
-                    st.success("✅ **Не са открити вредни съставки!**")
-                    st.balloons()
+                recognized_text = extract_text_from_image(temp_path)
+                os.remove(temp_path)
+            
+            with st.expander("📝 Разпознат текст", expanded=True):
+                st.text(recognized_text[:800] + ("..." if len(recognized_text) > 800 else ""))
+            
+            harmful_found = find_harmful(recognized_text)
+            
+            st.markdown("---")
+            st.subheader("🔬 РЕЗУЛТАТИ")
+            
+            if harmful_found:
+                st.error(f"⚠️ **Открити {len(harmful_found)} вредни съставки!**")
+                for item in harmful_found:
+                    st.warning(f"{item['info']['type']} **{item['term'].upper()}** → {item['info']['category']}")
             else:
-                st.warning("Моля, въведи текст за анализ")
-
-with tab2:
-    st.subheader("📋 Списък на вредните съставки")
-    
-    # Създаване на таблица
-    table_data = []
-    for category, data in harmful_ingredients_db.items():
-        all_names = data["names_bg"] + data["names_en"]
-        e_nums = ", ".join(data["e_numbers"]) if data["e_numbers"] else "-"
-        
-        for name in all_names:
-            table_data.append({
-                "Категория": category,
-                "Име на съставка": name.title(),
-                "Е-номер(и)": e_nums
-            })
-    
-    df_full = pd.DataFrame(table_data)
-    st.dataframe(df_full, use_container_width=True, height=400)
-    
-    # Експорт
-    st.download_button(
-        label="📥 Изтегли списъка (CSV)",
-        data=df_full.to_csv(index=False),
-        file_name="harmful_ingredients.csv",
-        mime="text/csv"
-    )
-
-with tab3:
-    st.subheader("📖 Как да използваш приложението")
-    st.markdown("""
-    1. **Качи снимка** на етикета на продукта
-    2. **Въведи текста** от етикета в полето (съставките)
-    3. Натисни **"Анализирай"**
-    
-    ### 🔍 Какво търси приложението?
-    - 🇧🇬 Български имена на вредни съставки
-    - 🇬🇧 Английски имена на вредни съставки  
-    - 🔢 Е-номера (E100-E999)
-    
-    ### ⚠️ Важно
-    Това приложение е **информативно** и не замества консултация със специалист.
-    """)
-
-# Долен колонтитул
-st.markdown("---")
-st.markdown("📌 **База данни:** Парабени, сулфати, оцветители, консерванти и други вредни добавки")
+                st.success("✅ **НЕ СА ОТКРИТИ ВРЕДНИ СЪСТАВКИ!**")
+                st.balloons()
