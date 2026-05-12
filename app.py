@@ -64,7 +64,7 @@ harmful_db = {
         "bg": ["захарин", "сахарин"],
         "en": ["saccharin"],
         "e": ["E954"]
-    }
+    },
         "Емулгатори и стабилизатори": {
         "bg": ["моно и диглицериди на мастни киселини", "полиглицерилови етери на мастни киселини", "соев лецитин", "лецитин"],
         "en": ["mono- and diglycerides of fatty acids", "polyglycerol esters of fatty acids", "soy lecithin", "lecithin"],
