@@ -7,6 +7,8 @@ import re
 from PIL import Image
 import io
 import os
+import pytesseract
+pytesseract.pytesseract.tesseract_cmd = r'C:\Users \Viktor'
 
 # Конфигурация на страницата
 st.set_page_config(
