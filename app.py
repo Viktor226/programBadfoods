@@ -132,7 +132,7 @@ harmful_db = {
 search_set = set()
 info_dict = {}
 # Функция за търсене (модифицирана)
-def harmful_found(text: str):
+def find_harmful(text: str):
     if not text:
         return []
     text_lower = text.lower()
@@ -168,7 +168,14 @@ def harmful_found(text: str):
                 })
                 break  # Спри след първото съвпадение в категорията
     
- 
+    # Премахване на дубликати
+    unique = []
+    seen = set()
+    for item in found:
+        if item["term"] not in seen:
+            seen.add(item["term"])
+            unique.append(item)
+    return unique
 
 # --- ПОКАЗВАНЕ НА РЕЗУЛТАТИ С ОПИСАНИЕ ---
 if harmful_found:
@@ -180,59 +187,6 @@ if harmful_found:
             st.markdown(f"**⚠️ Защо е вредна:** {item['description']}")
 else:
     st.success("✅ **НЕ СА ОТКРИТИ ВРЕДНИ СЪСТАВКИ!**")
-for category, data in harmful_db.items():
-    # Български имена
-    for name in data["bg"]:
-        name_low = name.lower()
-        search_set.add(name_low)
-        info_dict[name_low] = {"category": category, "lang": "🇧🇬 Българско"}
-    # Английски имена
-    for name in data["en"]:
-        name_low = name.lower()
-        search_set.add(name_low)
-        info_dict[name_low] = {"category": category, "lang": "🇬🇧 Английско"}
-    # Е-номера
-    for e_num in data["e"]:
-        search_set.add(e_num.upper())
-        info_dict[e_num.upper()] = {"category": category, "lang": "🔢 Е-номер"}
-
-def detect_harmful(text):
-    """Търси вредни съставки в текста"""
-    if not text:
-        return []
-    text_lower = text.lower()
-    found = []
-    
-    # Търсене на Е-номера
-    e_matches = re.findall(r'e[0-9]{3}', text_lower)
-    for e_code in e_matches:
-        e_upper = f"E{e_code[1:].upper()}"
-        if e_upper in search_set:
-            found.append({
-                "name": e_upper,
-                "category": info_dict[e_upper]["category"],
-                "type": info_dict[e_upper]["lang"]
-            })
-    
-    # Търсене на имена
-    for keyword in search_set:
-        if keyword in text_lower and not keyword.startswith('e'):
-            if len(keyword) > 3:
-                found.append({
-                    "name": keyword.title(),
-                    "category": info_dict[keyword]["category"],
-                    "type": info_dict[keyword]["lang"]
-                })
-    
-    # Премахване на дубликати
-    unique = []
-    seen = set()
-    for item in found:
-        key = (item["name"], item["category"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(item)
-    return unique
 
 def process_image(image_file):
     """Обработва изображението и разпознава текст с Tesseract"""
