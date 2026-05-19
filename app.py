@@ -132,7 +132,7 @@ harmful_db = {
 search_set = set()
 info_dict = {}
 # Функция за търсене (модифицирана)
-def find_harmful(text: str):
+def harmful_find(text: str):
     if not text:
         return []
     text_lower = text.lower()
