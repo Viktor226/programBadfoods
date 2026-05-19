@@ -178,7 +178,7 @@ def find_harmful(text: str):
     return unique
 
 # --- ПОКАЗВАНЕ НА РЕЗУЛТАТИ С ОПИСАНИЕ ---
-if harmful_found:
+if find_harmful:
     st.error(f"⚠️ **Открити {len(harmful_found)} потенциално вредни съставки!**")
     
     for item in harmful_found:
