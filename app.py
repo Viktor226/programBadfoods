@@ -235,7 +235,7 @@ def extract_text_from_image_improved(image_file):
         # Конфигурация за Tesseract - фокус върху цифри и букви
         # --psm 6 = единен текстов блок
         # -c tessedit_char_whitelist=... = разрешаваме само нужните символи
-        custom_config = r'--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789,./:;()% -'
+        custom_config = r'--psm 6'
         
         # Разпознаване на текст
         text = pytesseract.image_to_string(
