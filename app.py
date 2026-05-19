@@ -270,7 +270,7 @@ with tab1:
         with col2:
             if st.button("🔍 АНАЛИЗИРАЙ СНИМКАТА", type="primary", use_container_width=True):
                 with st.spinner("📖 Разпознаване на текст от изображение..."):
-                    recognized_text = extract_text_from_image(uploaded_file)
+                    recognized_text = extract_text_from_image_improved(uploaded_file)
                 
                 with st.expander("📝 Разпознат текст от снимката", expanded=False):
                     if recognized_text.strip():
