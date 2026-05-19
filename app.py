@@ -182,26 +182,68 @@ def find_harmful_ingredients(text):
     return found_items
 
 # --- Функция за разпознаване на текст от изображение ---
-def extract_text_from_image(image_file):
-    """Разпознава текст от снимка с Tesseract OCR"""
+import cv2
+import numpy as np
+import pytesseract
+from PIL import Image
+
+def preprocess_image_for_ocr(image_file):
+    """
+    Подобрена预处理 на изображение за Tesseract OCR
+    """
+    # Четене на изображението
+    img = Image.open(image_file)
+    img_array = np.array(img)
+    
+    # Конвертиране към RGB (ако е RGBA)
+    if len(img_array.shape) == 3 and img_array.shape[2] == 4:
+        img_array = cv2.cvtColor(img_array, cv2.COLOR_RGBA2RGB)
+    
+    # Конвертиране в сива скала
+    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    
+    # Стъпка 1: Увеличаване на контраста (CLAHE)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    enhanced = clahe.apply(gray)
+    
+    # Стъпка 2: Премахване на шум с Gaussian blur
+    denoised = cv2.GaussianBlur(enhanced, (3, 3), 0)
+    
+    # Стъпка 3: Адаптивно thresholding (по-добро от глобалното)
+    # За светъл текст на тъмен фон или обратното
+    thresh = cv2.adaptiveThreshold(
+        denoised, 255, 
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+        cv2.THRESH_BINARY, 11, 2
+    )
+    
+    # Стъпка 4: Морфологични операции за свързване на прекъснати символи
+    kernel = np.ones((2, 2), np.uint8)
+    processed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    
+    # Стъпка 5: Премахване на малки шумове
+    processed = cv2.medianBlur(processed, 1)
+    
+    return processed
+
+def extract_text_from_image_improved(image_file):
+    """Разширена функция за разпознаване на текст"""
     try:
-        # Четене на изображението
-        image = Image.open(image_file)
-        img_array = np.array(image)
+        # Предварителна обработка
+        processed_img = preprocess_image_for_ocr(image_file)
         
-        # Конвертиране към RGB
-        if len(img_array.shape) == 3:
-            img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        
-        # Преобразуване в сива скала
-        gray = cv2.cvtColor(img_array, cv2.COLOR_BGR2GRAY)
-        
-        # Подобряване на качеството
-        gray = cv2.medianBlur(gray, 1)
-        gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+        # Конфигурация за Tesseract - фокус върху цифри и букви
+        # --psm 6 = единен текстов блок
+        # -c tessedit_char_whitelist=... = разрешаваме само нужните символи
+        custom_config = r'--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789,./:;()% -'
         
         # Разпознаване на текст
-        text = pytesseract.image_to_string(gray, lang='bul+eng')
+        text = pytesseract.image_to_string(
+            processed_img, 
+            lang='bul+eng', 
+            config=custom_config
+        )
+        
         return text
     except Exception as e:
         st.error(f"Грешка при разпознаване: {str(e)}")
